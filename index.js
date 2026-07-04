@@ -49,10 +49,6 @@ const verifyFBToken = async (req, res, next) => {
   }
 };
 
-module.exports = verifyFBToken;
-
-
-
 // Mongodb Connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.qoz91xh.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -74,196 +70,444 @@ async function run() {
     const usersCollection = db.collection('users');
     const riderCollection = db.collection('riders')
 
+    // verifyAdmin middleware (inside run() to access collections)
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email }
+      const user = await usersCollection.findOne(query)
+      const isAdmin = user?.role === 'admin'
+      if (!isAdmin) {
+        return res.status(403).send({ message: 'Forbidden' })
+      }
+      next();
+    }
 
-    // rider related apis
-    app.get("/riders", verifyFBToken, async (req, res) => {
-      const options = {
-        sort: { createdAt: -1 },
-      };
-      const result = await riderCollection.find({}, options).toArray();
+    // verifyRider middleware (inside run() to access collections)
+    const verifyRider = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email };
+      const result = await usersCollection.findOne(query)
+      const isRider = result?.role === 'rider'
+      if (!isRider) {
+        return res.status(403).send({ message: 'Forbidden' })
+      }
+      next();
+    }
 
-      res.send(result);
+
+    // Get all riders (admin only)
+    app.get("/riders", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const options = {
+          sort: { createdAt: -1 },
+        };
+        const result = await riderCollection.find({}, options).toArray();
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     });
-    // patch rider approved status
-    app.patch('/rider/:id/approve', verifyFBToken, async (req, res) => {
-      const id = req.params.id;
-      const { email } = req.body;
-      const query = { _id: new ObjectId(id) }
-      const updateDoc = {
-        $set: {
-          status: "approved",
-        }
-      }
 
-      // Update user role
-      const userResult = await usersCollection.updateOne(
-        { email },
-        {
+    // Approve rider (admin only)
+    app.patch('/rider/:id/approve', verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { email } = req.body;
+        const query = { _id: new ObjectId(id) }
+        const updateDoc = {
           $set: {
-            role: "rider",
-          },
+            status: "approved",
+          }
         }
-      );
-      const result = await riderCollection.updateOne(query, updateDoc)
-      res.send({ result, userResult })
-    })
-    // patch rider rejected status
-    app.patch('/rider/:id/reject', verifyFBToken, async (req, res) => {
-      const id = req.params.id;
-      const { email } = req.body;
-      const query = { _id: new ObjectId(id) }
-      const updateDoc = {
-        $set: {
-          status: "rejected",
-        }
-      }
 
-      // Change role back to user
-      const userResult = await usersCollection.updateOne(
-        { email },
-        {
-          $set: {
-            role: "user",
-          },
-        }
-      );
-      const result = await riderCollection.updateOne(query, updateDoc)
-      res.send({ result, userResult })
+        // Update user role
+        const userResult = await usersCollection.updateOne(
+          { email },
+          {
+            $set: {
+              role: "rider",
+            },
+          }
+        );
+        const result = await riderCollection.updateOne(query, updateDoc)
+        res.send({ result, userResult })
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     })
-    // post a rider
+
+    // Reject rider (admin only)
+    app.patch('/rider/:id/reject', verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { email } = req.body;
+        const query = { _id: new ObjectId(id) }
+        const updateDoc = {
+          $set: {
+            status: "rejected",
+          }
+        }
+
+        // Change role back to user
+        const userResult = await usersCollection.updateOne(
+          { email },
+          {
+            $set: {
+              role: "user",
+            },
+          }
+        );
+        const result = await riderCollection.updateOne(query, updateDoc)
+        res.send({ result, userResult })
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    })
+
+    // Post a rider application
     app.post('/rider', verifyFBToken, async (req, res) => {
-      const query = { email: req.body.email };
-      const existingRider = await riderCollection.findOne(query)
-      if (existingRider) {
-        return res.send({ message: 'Rider already exists', insertedId: null })
+      try {
+        const query = { email: req.body.email };
+        const existingRider = await riderCollection.findOne(query)
+        if (existingRider) {
+          return res.send({ message: 'Rider already exists', insertedId: null })
+        }
+        const rider = req.body;
+        const result = await riderCollection.insertOne(rider);
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
       }
-      const rider = req.body;
-      const result = await riderCollection.insertOne(rider);
-      res.send(result);
     })
 
-    // Users api
+    // Create user
     app.post('/users', async (req, res) => {
-      const user = req.body;
-      const query = { email: user.email }
-      const existingUser = await usersCollection.findOne(query);
-      if (existingUser) {
-        return res.send({ message: "User already exists", insertedId: null })
+      try {
+        const user = req.body;
+        const query = { email: user.email }
+        const existingUser = await usersCollection.findOne(query);
+        if (existingUser) {
+          return res.send({ message: "User already exists", insertedId: null })
+        }
+        const result = await usersCollection.insertOne(user);
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
       }
-      const result = await usersCollection.insertOne(user);
-      res.send(result)
-    })
-    // get Users data
-    app.get('/users', verifyFBToken, async (req, res) => {
-      const result = await usersCollection.find().toArray()
-      res.send(result)
     })
 
-    // get single user
-    app.get("/users/:email", verifyFBToken, async (req, res) => {
-      const email = req.params.email;
+    // Get all users (admin only)
+    app.get('/users', verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const result = await usersCollection.find().toArray()
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    })
 
-      const user = await usersCollection.findOne({ email });
-
-      res.send(user);
+    // Check if user is an admin (must be before /users/:email)
+    app.get('/users/admin/:email', verifyFBToken, async (req, res) => {
+      try {
+        const email = req.params.email;
+        if (email !== req.decoded.email) {
+          return res.status(403).send({ message: 'Forbidden' })
+        }
+        const user = await usersCollection.findOne({ email });
+        const isAdmin = user?.role === 'admin';
+        res.send({ isAdmin });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     });
-    //Parcels api
-    app.get('/parcels', async (req, res) => {
-      let query = {}
-      const email = req.query.email;
-      // parcles?email=''&
-      if (email) {
-        query.email = email;
+
+    // Check if user is a rider (must be before /users/:email)
+    app.get('/users/rider/:email', verifyFBToken, async (req, res) => {
+      try {
+        const email = req.params.email;
+        if (email !== req.decoded.email) {
+          return res.status(403).send({ message: 'Forbidden' })
+        }
+        const user = await usersCollection.findOne({ email });
+        const isRider = user?.role === 'rider';
+        res.send({ isRider });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
       }
+    });
 
-      const option = { sort: { createdAt: -1 } }
-      const cursor = parcelsCollection.find(query, option);
-      const result = await cursor.toArray()
-      res.send(result)
+    // Make user an admin (admin only)
+    app.patch('/users/admin/:email', verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const email = req.params.email;
+        const result = await usersCollection.updateOne(
+          { email },
+          { $set: { role: 'admin' } }
+        );
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+    // Get single user (must be after /users/admin/:email and /users/rider/:email)
+    app.get("/users/:email", verifyFBToken, async (req, res) => {
+      try {
+        const email = req.params.email;
+        const user = await usersCollection.findOne({ email });
+        res.send(user);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+    // Get parcels (with optional email filter)
+    app.get('/parcels', verifyFBToken, async (req, res) => {
+      try {
+        let query = {}
+        const email = req.query.email;
+        if (email) {
+          query.email = email;
+        }
+
+        const option = { sort: { createdAt: -1 } }
+        const cursor = parcelsCollection.find(query, option);
+        const result = await cursor.toArray()
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     })
 
-    // Post parcels
+    // Post parcel
     app.post('/parcels', verifyFBToken, async (req, res) => {
-      const parcel = req.body
-      const result = await parcelsCollection.insertOne(parcel)
-      res.send(result)
-    })
-    // Delete Parcels Orders
-    app.delete('/parcels/:id', verifyFBToken, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) }
-      const result = await parcelsCollection.deleteOne(query)
-      res.send(result)
+      try {
+        const parcel = req.body
+        const result = await parcelsCollection.insertOne(parcel)
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     })
 
-    // get parcel details api
+    // Get parcels assigned to a rider (must be before /parcels/:id)
+    app.get('/parcels/rider/:email', verifyFBToken, async (req, res) => {
+      try {
+        const email = req.params.email;
+        const option = { sort: { assignedAt: -1 } }
+        const result = await parcelsCollection.find({ riderEmail: email }, option).toArray()
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    })
+
+    // Get parcel details
     app.get('/parcels/:id', verifyFBToken, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) }
-      const result = await parcelsCollection.findOne(query)
-      res.send(result)
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) }
+        const result = await parcelsCollection.findOne(query)
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    })
+
+    // Update parcel info (before payment only)
+    app.patch('/parcels/:id', verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) }
+        const parcel = await parcelsCollection.findOne(query);
+        if (parcel?.status === 'paid') {
+          return res.status(400).send({ message: 'Cannot update a paid parcel' })
+        }
+        const updateDoc = { $set: { ...req.body, updatedAt: new Date() } }
+        const result = await parcelsCollection.updateOne(query, updateDoc)
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    })
+
+    // Delete parcel
+    app.delete('/parcels/:id', verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) }
+        const result = await parcelsCollection.deleteOne(query)
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    })
+
+    // Assign rider to parcel (admin only)
+    app.patch('/parcels/:id/assign-rider', verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { riderId, riderEmail, riderName } = req.body;
+        const query = { _id: new ObjectId(id) }
+        const updateDoc = {
+          $set: {
+            riderId,
+            riderEmail,
+            riderName,
+            deliveryStatus: 'assigned',
+            assignedAt: new Date(),
+          }
+        }
+        const result = await parcelsCollection.updateOne(query, updateDoc)
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    })
+
+    // Update delivery status (rider only)
+    app.patch('/parcels/:id/delivery-status', verifyFBToken, verifyRider, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { deliveryStatus } = req.body;
+        const validStatuses = ['picked_up', 'in_transit', 'delivered'];
+        if (!validStatuses.includes(deliveryStatus)) {
+          return res.status(400).send({
+            message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+          })
+        }
+        const query = { _id: new ObjectId(id) }
+        const updateFields = {
+          deliveryStatus,
+          [`${deliveryStatus}At`]: new Date(),
+        }
+        const updateDoc = { $set: updateFields }
+        const result = await parcelsCollection.updateOne(query, updateDoc)
+        res.send(result)
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     })
 
     // Create checkout session
     app.post('/create-checkout-session', verifyFBToken, async (req, res) => {
-      const parcelInfo = req.body;
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price_data: {
-              currency: "usd",
-              unit_amount: Math.round(parcelInfo.price * 100),
-              product_data: {
-                name: parcelInfo.productName,
-                description: parcelInfo.productDescription,
+      try {
+        const parcelInfo = req.body;
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+                unit_amount: Math.round(parcelInfo.price * 100),
+                product_data: {
+                  name: parcelInfo.productName,
+                  description: parcelInfo.productDescription,
+                },
               },
+              quantity: 1,
             },
-            quantity: 1,
+          ],
+          mode: "payment",
+
+          success_url: `${process.env.CLIENT_URL}/dashboard/payment-success?parcelId=${parcelInfo._id}&session_id={CHECKOUT_SESSION_ID}`,
+
+          cancel_url: `${process.env.CLIENT_URL}/dashboard/payment-cancel`,
+
+          metadata: {
+            parcelId: parcelInfo._id,
+            userEmail: parcelInfo.email,
+            sender: parcelInfo.senderServiceCenter,
+            receiver: parcelInfo.receiverServiceCenter,
+            deliveryCost: parcelInfo.price.toString(), // metadata values should be strings
           },
-        ],
-        mode: "payment",
-
-        success_url: `${process.env.CLIENT_URL}/dashboard/payment-success?parcelId=${parcelInfo._id}&session_id={CHECKOUT_SESSION_ID}`,
-
-        cancel_url: `${process.env.CLIENT_URL}/dashboard/payment-cancel`,
-
-        metadata: {
-          parcelId: parcelInfo._id,
-          userEmail: parcelInfo.email,
-          sender: parcelInfo.senderServiceCenter,
-          receiver: parcelInfo.receiverServiceCenter,
-          deliveryCost: parcelInfo.price.toString(), // metadata values should be strings
-        },
-      });
-      res.json({ url: session.url })
-      // console.log(session.url);
+        });
+        res.json({ url: session.url })
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     })
-    // 
+
+    // Payment success callback
     app.patch('/payment-success', async (req, res) => {
-      const sessionId = req.query.session_id;
-      const session = await stripe.checkout.sessions.retrieve(sessionId)
-      const generateTrackingId = () => {
-        const timestamp = Date.now();
-        const random = Math.floor(Math.random() * 10000);
-        return `SWIFT-${timestamp}${random}`;
-      };
-      if (session.payment_status == 'paid') {
-        const parcelId = session.metadata.parcelId;
-        const query = { _id: new ObjectId(parcelId) }
-        const updateDoc = {
-          $set: {
-            status: "paid",
-            deliveryStatus: "pending",
-            tracking_no: generateTrackingId(),
-            transactionId: session.payment_intent,
-            paidAt: new Date(),
+      try {
+        const sessionId = req.query.session_id;
+        const session = await stripe.checkout.sessions.retrieve(sessionId)
+        const generateTrackingId = () => {
+          const timestamp = Date.now();
+          const random = Math.floor(Math.random() * 10000);
+          return `SWIFT-${timestamp}${random}`;
+        };
+        if (session.payment_status == 'paid') {
+          const parcelId = session.metadata.parcelId;
+          const query = { _id: new ObjectId(parcelId) }
+          const updateDoc = {
+            $set: {
+              status: "paid",
+              deliveryStatus: "pending",
+              tracking_no: generateTrackingId(),
+              transactionId: session.payment_intent,
+              paidAt: new Date(),
+            }
           }
+          const updateResult = await parcelsCollection.updateOne(query, updateDoc);
+          res.send({ success: true, message: "Payment success", updateResult })
+        } else {
+          res.send({ message: "Payment failed" })
         }
-        const updateResult = await parcelsCollection.updateOne(query, updateDoc);
-        res.send({ success: true, message: "Payment success", updateResult })
-      } else {
-        res.send({ message: "Payment failed" })
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    })
+
+
+    //  ADMIN STATS API
+    app.get('/admin-stats', verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const totalUsers = await usersCollection.countDocuments();
+        const totalRiders = await riderCollection.countDocuments({ status: 'approved' });
+        const totalParcels = await parcelsCollection.countDocuments();
+        const deliveredParcels = await parcelsCollection.countDocuments({ deliveryStatus: 'delivered' });
+        const pendingParcels = await parcelsCollection.countDocuments({ deliveryStatus: 'pending' });
+
+        // Calculate total revenue from paid parcels
+        const revenueResult = await parcelsCollection.aggregate([
+          { $match: { status: 'paid' } },
+          { $group: { _id: null, totalRevenue: { $sum: { $toDouble: '$price' } } } }
+        ]).toArray();
+        const totalRevenue = revenueResult[0]?.totalRevenue || 0;
+
+        res.send({
+          totalUsers,
+          totalRiders,
+          totalParcels,
+          deliveredParcels,
+          pendingParcels,
+          totalRevenue,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
       }
     })
 
