@@ -87,26 +87,48 @@ async function run() {
     // patch rider approved status
     app.patch('/rider/:id/approve', verifyFBToken, async (req, res) => {
       const id = req.params.id;
+      const { email } = req.body;
       const query = { _id: new ObjectId(id) }
       const updateDoc = {
         $set: {
           status: "approved",
         }
       }
+
+      // Update user role
+      const userResult = await usersCollection.updateOne(
+        { email },
+        {
+          $set: {
+            role: "rider",
+          },
+        }
+      );
       const result = await riderCollection.updateOne(query, updateDoc)
-      res.send(result)
+      res.send({ result, userResult })
     })
     // patch rider rejected status
     app.patch('/rider/:id/reject', verifyFBToken, async (req, res) => {
       const id = req.params.id;
+      const { email } = req.body;
       const query = { _id: new ObjectId(id) }
       const updateDoc = {
         $set: {
           status: "rejected",
         }
       }
+
+      // Change role back to user
+      const userResult = await usersCollection.updateOne(
+        { email },
+        {
+          $set: {
+            role: "user",
+          },
+        }
+      );
       const result = await riderCollection.updateOne(query, updateDoc)
-      res.send(result)
+      res.send({ result, userResult })
     })
     // post a rider
     app.post('/rider', verifyFBToken, async (req, res) => {
@@ -136,6 +158,15 @@ async function run() {
       const result = await usersCollection.find().toArray()
       res.send(result)
     })
+
+    // get single user
+    app.get("/users/:email", verifyFBToken, async (req, res) => {
+      const email = req.params.email;
+
+      const user = await usersCollection.findOne({ email });
+
+      res.send(user);
+    });
     //Parcels api
     app.get('/parcels', async (req, res) => {
       let query = {}
