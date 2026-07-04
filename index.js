@@ -5,12 +5,54 @@ require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const port = process.env.PORT || 3000;
 const dns = require("dns");
+
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 // Change DNS
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 //middle ware
 app.use(cors());
 app.use(express.json());
+
+// verify User
+const { initializeApp, cert } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
+
+const serviceAccount = require("./firebase-admin-sdk.json");
+
+initializeApp({
+  credential: cert(serviceAccount),
+});
+
+const verifyFBToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).send({
+      message: "Unauthorized access",
+    });
+  }
+
+  try {
+    const token = authHeader.split(" ")[1];
+
+    const decodedToken = await getAuth().verifyIdToken(token);
+
+    req.decoded = decodedToken;
+
+    next();
+  } catch (error) {
+    console.error(error);
+
+    return res.status(401).send({
+      message: "Unauthorized access",
+    });
+  }
+};
+
+module.exports = verifyFBToken;
+
+
+
 // Mongodb Connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.qoz91xh.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -30,6 +72,53 @@ async function run() {
     const db = client.db('swift_deliver_db');
     const parcelsCollection = db.collection('parcels')
     const usersCollection = db.collection('users');
+    const riderCollection = db.collection('riders')
+
+
+    // rider related apis
+    app.get("/riders", verifyFBToken, async (req, res) => {
+      const options = {
+        sort: { createdAt: -1 },
+      };
+      const result = await riderCollection.find({}, options).toArray();
+
+      res.send(result);
+    });
+    // patch rider approved status
+    app.patch('/rider/:id/approve', verifyFBToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) }
+      const updateDoc = {
+        $set: {
+          status: "approved",
+        }
+      }
+      const result = await riderCollection.updateOne(query, updateDoc)
+      res.send(result)
+    })
+    // patch rider rejected status
+    app.patch('/rider/:id/reject', verifyFBToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) }
+      const updateDoc = {
+        $set: {
+          status: "rejected",
+        }
+      }
+      const result = await riderCollection.updateOne(query, updateDoc)
+      res.send(result)
+    })
+    // post a rider
+    app.post('/rider', verifyFBToken, async (req, res) => {
+      const query = { email: req.body.email };
+      const existingRider = await riderCollection.findOne(query)
+      if (existingRider) {
+        return res.send({ message: 'Rider already exists', insertedId: null })
+      }
+      const rider = req.body;
+      const result = await riderCollection.insertOne(rider);
+      res.send(result);
+    })
 
     // Users api
     app.post('/users', async (req, res) => {
@@ -42,7 +131,11 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result)
     })
-
+    // get Users data
+    app.get('/users', verifyFBToken, async (req, res) => {
+      const result = await usersCollection.find().toArray()
+      res.send(result)
+    })
     //Parcels api
     app.get('/parcels', async (req, res) => {
       let query = {}
@@ -59,13 +152,13 @@ async function run() {
     })
 
     // Post parcels
-    app.post('/parcels', async (req, res) => {
+    app.post('/parcels', verifyFBToken, async (req, res) => {
       const parcel = req.body
       const result = await parcelsCollection.insertOne(parcel)
       res.send(result)
     })
     // Delete Parcels Orders
-    app.delete('/parcels/:id', async (req, res) => {
+    app.delete('/parcels/:id', verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) }
       const result = await parcelsCollection.deleteOne(query)
@@ -73,7 +166,7 @@ async function run() {
     })
 
     // get parcel details api
-    app.get('/parcels/:id', async (req, res) => {
+    app.get('/parcels/:id', verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) }
       const result = await parcelsCollection.findOne(query)
@@ -81,7 +174,7 @@ async function run() {
     })
 
     // Create checkout session
-    app.post('/create-checkout-session', async (req, res) => {
+    app.post('/create-checkout-session', verifyFBToken, async (req, res) => {
       const parcelInfo = req.body;
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ["card"],
@@ -119,23 +212,28 @@ async function run() {
     app.patch('/payment-success', async (req, res) => {
       const sessionId = req.query.session_id;
       const session = await stripe.checkout.sessions.retrieve(sessionId)
-     if(session.payment_status=='paid'){
-        const email = session.metadata.userEmail;
-      const parcelId = session.metadata.parcelId;
-      const deliveryCost = session.metadata.deliveryCost;
-      const query = { _id: new ObjectId(parcelId) }
-      const updateDoc={
-        $set: {
-         status: "paid",
-          deliveryStatus: "pending",
-         tracking_no:session. payment_intent
+      const generateTrackingId = () => {
+        const timestamp = Date.now();
+        const random = Math.floor(Math.random() * 10000);
+        return `SWIFT-${timestamp}${random}`;
+      };
+      if (session.payment_status == 'paid') {
+        const parcelId = session.metadata.parcelId;
+        const query = { _id: new ObjectId(parcelId) }
+        const updateDoc = {
+          $set: {
+            status: "paid",
+            deliveryStatus: "pending",
+            tracking_no: generateTrackingId(),
+            transactionId: session.payment_intent,
+            paidAt: new Date(),
+          }
         }
+        const updateResult = await parcelsCollection.updateOne(query, updateDoc);
+        res.send({ success: true, message: "Payment success", updateResult })
+      } else {
+        res.send({ message: "Payment failed" })
       }
-      const updateResult = await parcelsCollection.updateOne(query, updateDoc);
-      res.send({ success: true, message: "Payment success", updateResult })
-     }else{
-      res.send({ message: "Payment failed" })
-     }
     })
 
     // Send a ping to confirm a successful connection
