@@ -17,7 +17,6 @@ app.use(cors({
   origin: process.env.CLIENT_URL,
   credentials: true,
 }));
-app.use(express.json());
 
 // ---------- Firebase Admin ----------
 const { initializeApp, cert } = require("firebase-admin/app");
