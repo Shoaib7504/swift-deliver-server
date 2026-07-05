@@ -490,12 +490,20 @@ async function run() {
         const deliveredParcels = await parcelsCollection.countDocuments({ deliveryStatus: 'delivered' });
         const pendingParcels = await parcelsCollection.countDocuments({ deliveryStatus: 'pending' });
 
-        // Calculate total revenue from paid parcels
+        // Calculate total revenue from paid parcels (using deliveryCost field)
         const revenueResult = await parcelsCollection.aggregate([
           { $match: { status: 'paid' } },
-          { $group: { _id: null, totalRevenue: { $sum: { $toDouble: '$price' } } } }
+          { $group: { _id: null, totalRevenue: { $sum: { $toDouble: '$deliveryCost' } } } }
         ]).toArray();
         const totalRevenue = revenueResult[0]?.totalRevenue || 0;
+
+        // Calculate rider payouts (30% of deliveryCost for all delivered parcels)
+        const payoutsResult = await parcelsCollection.aggregate([
+          { $match: { status: 'paid', deliveryStatus: 'delivered' } },
+          { $group: { _id: null, totalPayouts: { $sum: { $toDouble: '$deliveryCost' } } } }
+        ]).toArray();
+        const totalRiderPayouts = (payoutsResult[0]?.totalPayouts || 0) * 0.3;
+        const adminNetProfit = totalRevenue - totalRiderPayouts;
 
         res.send({
           totalUsers,
@@ -504,6 +512,8 @@ async function run() {
           deliveredParcels,
           pendingParcels,
           totalRevenue,
+          totalRiderPayouts,
+          adminNetProfit,
         });
       } catch (error) {
         console.error(error);
