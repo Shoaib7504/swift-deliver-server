@@ -542,6 +542,11 @@ app.get('/', (req, res) => {
   res.send('Zap Shift Server is running');
 });
 
-app.listen(port, () => {
-  console.log(`Zap Shift Server is running on port ${port}`);
-});
+// Only start the server locally; Vercel uses the exported app as a serverless handler
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(port, () => {
+    console.log(`Zap Shift Server is running on port ${port}`);
+  });
+}
+
+module.exports = app;
