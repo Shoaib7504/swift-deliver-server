@@ -10,14 +10,19 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 // Change DNS
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 //middle ware
-app.use(cors());
+app.use(cors({
+  origin: process.env.CLIENT_URL,
+  credentials: true,
+}));
 app.use(express.json());
 
 // verify User
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 
-const serviceAccount = require("./firebase-admin-sdk.json");
+// Load Firebase service account from env variable (required in production)
+// Set FIREBASE_SERVICE_ACCOUNT env var to the minified JSON content of firebase-admin-sdk.json
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 initializeApp({
   credential: cert(serviceAccount),
