@@ -26,9 +26,13 @@ const { getAuth } = require("firebase-admin/auth");
 let serviceAccount;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
-    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    let rawString = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+    if (!rawString.startsWith('{')) {
+      rawString = Buffer.from(rawString, 'base64').toString('utf8');
+    }
+    serviceAccount = JSON.parse(rawString);
   } catch (error) {
-    console.error("ERROR: Failed to parse FIREBASE_SERVICE_ACCOUNT env variable. Make sure it is valid JSON.", error);
+    console.error("ERROR: Failed to parse FIREBASE_SERVICE_ACCOUNT env variable. Make sure it is valid JSON or Base64.", error);
   }
 } else {
   console.warn("WARNING: FIREBASE_SERVICE_ACCOUNT env variable is not set.");
@@ -563,7 +567,7 @@ app.use((err, req, res, next) => {
   res.status(500).send({ message: "Internal server error" });
 });
 
-// ---------- Start server (runs everywhere except on Vercel) ----------
+
 if (!process.env.VERCEL) {
   connectDB()
     .then(() => {
