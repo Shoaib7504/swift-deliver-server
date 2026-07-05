@@ -563,8 +563,8 @@ app.use((err, req, res, next) => {
   res.status(500).send({ message: "Internal server error" });
 });
 
-// ---------- Start server (local only; Vercel uses exported app) ----------
-if (process.env.NODE_ENV !== 'production') {
+// ---------- Start server (runs everywhere except on Vercel) ----------
+if (!process.env.VERCEL) {
   connectDB()
     .then(() => {
       app.listen(port, () => {
