@@ -5,7 +5,12 @@ require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const port = process.env.PORT || 3000;
 
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? require('stripe')(process.env.STRIPE_SECRET_KEY)
+  : null;
+if (!stripe) {
+  console.warn("WARNING: STRIPE_SECRET_KEY is not set. Stripe functionality will be disabled.");
+}
 
 // ---------- Middleware ----------
 app.use(cors({
@@ -18,11 +23,24 @@ app.use(express.json());
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+let serviceAccount;
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  try {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } catch (error) {
+    console.error("ERROR: Failed to parse FIREBASE_SERVICE_ACCOUNT env variable. Make sure it is valid JSON.", error);
+  }
+} else {
+  console.warn("WARNING: FIREBASE_SERVICE_ACCOUNT env variable is not set.");
+}
 
-initializeApp({
-  credential: cert(serviceAccount),
-});
+if (serviceAccount) {
+  initializeApp({
+    credential: cert(serviceAccount),
+  });
+} else {
+  console.warn("WARNING: Firebase Admin could not be initialized because serviceAccount is missing or invalid.");
+}
 
 const verifyFBToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -33,6 +51,10 @@ const verifyFBToken = async (req, res, next) => {
 
   try {
     const token = authHeader.split(" ")[1];
+    if (!serviceAccount) {
+      console.error("Firebase Admin SDK was not initialized. Check your FIREBASE_SERVICE_ACCOUNT environment variable.");
+      return res.status(500).send({ message: "Firebase Authentication is unconfigured on the server." });
+    }
     const decodedToken = await getAuth().verifyIdToken(token);
     req.decoded = decodedToken;
     next();
@@ -416,6 +438,10 @@ app.patch('/parcels/:id/delivery-status', verifyFBToken, verifyRider, async (req
 app.post('/create-checkout-session', verifyFBToken, async (req, res) => {
   try {
     const parcelInfo = req.body;
+    if (!stripe) {
+      console.error("Stripe is not configured on this server.");
+      return res.status(500).send({ message: "Payment service is currently unavailable." });
+    }
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       line_items: [
@@ -453,6 +479,10 @@ app.post('/create-checkout-session', verifyFBToken, async (req, res) => {
 app.patch('/payment-success', async (req, res) => {
   try {
     const sessionId = req.query.session_id;
+    if (!stripe) {
+      console.error("Stripe is not configured on this server.");
+      return res.status(500).send({ message: "Payment service is currently unavailable." });
+    }
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     const generateTrackingId = () => {
