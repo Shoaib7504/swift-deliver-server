@@ -13,10 +13,27 @@ if (!stripe) {
 }
 
 // ---------- Middleware ----------
-app.use(cors({
-  origin: process.env.CLIENT_URL,
-  credentials: true,
-}));
+const allowedOrigins = [
+  "https://swift-deliver-ten.vercel.app",
+  "http://localhost:5173",
+  
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.error("CORS blocked origin:", origin);
+        callback(new Error(`CORS blocked: ${origin}`));
+      }
+    },
+    credentials: true,
+  })
+);
+
+app.use(express.json());
 
 // ---------- Firebase Admin ----------
 const { initializeApp, cert } = require("firebase-admin/app");
