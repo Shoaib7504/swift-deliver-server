@@ -12,7 +12,7 @@ if (!stripe) {
   console.warn("WARNING: STRIPE_SECRET_KEY is not set. Stripe functionality will be disabled.");
 }
 
-// ---------- Middleware ----------
+// Middleware
 const allowedOrigins = [
   "https://swift-deliver-ten.vercel.app",
   "http://localhost:5173",
@@ -35,7 +35,7 @@ app.use(
 
 app.use(express.json());
 
-// ---------- Firebase Admin ----------
+// Firebase Admin
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 
@@ -84,7 +84,7 @@ const verifyFBToken = async (req, res, next) => {
   }
 };
 
-// ---------- MongoDB (serverless-safe cached connection) ----------
+// MongoDB (serverless-safe cached connection)
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.qoz91xh.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 const client = new MongoClient(uri, {
@@ -129,7 +129,7 @@ app.use(async (req, res, next) => {
   }
 });
 
-// ---------- Role-check middlewares ----------
+// Role-check middlewares
 const verifyAdmin = async (req, res, next) => {
   const email = req.decoded.email;
   const user = await usersCollection.findOne({ email });
@@ -150,12 +150,12 @@ const verifyRider = async (req, res, next) => {
   next();
 };
 
-// ---------- Root ----------
+// Root
 app.get('/', (req, res) => {
   res.send('Zap Shift Server is running');
 });
 
-// ---------- Riders ----------
+// Riders
 
 // Get all riders (admin only)
 app.get("/riders", verifyFBToken, verifyAdmin, async (req, res) => {
@@ -226,7 +226,7 @@ app.post('/rider', verifyFBToken, async (req, res) => {
   }
 });
 
-// ---------- Users ----------
+// Users
 
 // Create user
 app.post('/users', async (req, res) => {
@@ -315,7 +315,7 @@ app.get("/users/:email", verifyFBToken, async (req, res) => {
   }
 });
 
-// ---------- Parcels ----------
+// Parcels
 
 // Get parcels (with optional email filter)
 app.get('/parcels', verifyFBToken, async (req, res) => {
@@ -452,7 +452,7 @@ app.patch('/parcels/:id/delivery-status', verifyFBToken, verifyRider, async (req
   }
 });
 
-// ---------- Payments ----------
+// Payments
 
 // Create checkout session
 app.post('/create-checkout-session', verifyFBToken, async (req, res) => {
@@ -534,7 +534,7 @@ app.patch('/payment-success', async (req, res) => {
   }
 });
 
-// ---------- Admin stats ----------
+// Admin stats
 app.get('/admin-stats', verifyFBToken, verifyAdmin, async (req, res) => {
   try {
     const totalUsers = await usersCollection.countDocuments();
@@ -572,12 +572,12 @@ app.get('/admin-stats', verifyFBToken, verifyAdmin, async (req, res) => {
   }
 });
 
-// ---------- 404 handler ----------
+// 404 handler
 app.use((req, res) => {
   res.status(404).send({ message: "Route not found" });
 });
 
-// ---------- Global error handler (catches anything unhandled) ----------
+// Global error handler (catches anything unhandled)
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(500).send({ message: "Internal server error" });
